@@ -4,6 +4,8 @@ A compact PyTorch codebase for training a GPT-2-style language model from scratc
 
 No pretrained model weights are used. Attention is implemented in PyTorch and dispatches to optimized backend kernels through `torch.nn.functional.scaled_dot_product_attention`.
 
+The original assignment is available in [docs/capstone-project-pretraining-llm.pdf](docs/capstone-project-pretraining-llm.pdf).
+
 ## Features
 
 - Decoder-only Transformer with causal multi-head attention, LayerNorm, residual connections, and MLP blocks
@@ -230,3 +232,17 @@ python plot_metrics.py \
 ```
 
 This writes `loss.png` and `throughput.png`.
+
+## Potential next steps
+
+### Rotary Position Embeddings (RoPE)
+
+Replace the learned absolute positional embeddings with Rotary Position Embeddings applied to the query and key tensors in each attention head. Compare the baseline and RoPE models using the same model size, seed, learning rate, and token budget, and report validation loss, perplexity, and throughput.
+
+An optional extension is to train at a context length of 512 and evaluate at 1,024 tokens to study length extrapolation. RoPE's benefits may be less visible when training and evaluation both stay within the same context length.
+
+### QK RMSNorm
+
+Apply RMSNorm independently to the query and key tensors in each attention head before scaled dot-product attention. Compare training stability, validation loss, perplexity, and throughput against the unchanged baseline. An optional higher-learning-rate run can test whether QK normalization improves robustness to gradient spikes.
+
+Run the baseline, RoPE, and QK RMSNorm experiments separately so that each result isolates one architectural change.
