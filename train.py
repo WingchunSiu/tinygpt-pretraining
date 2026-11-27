@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument("--n-head", type=int, default=4)
     parser.add_argument("--n-embd", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--use-rope", action="store_true")
     parser.add_argument("--learning-rate", type=float, default=6e-4)
     parser.add_argument("--weight-decay", type=float, default=0.1)
     parser.add_argument("--beta1", type=float, default=0.9)
@@ -105,6 +106,7 @@ def main():
         n_head=args.n_head,
         n_embd=args.n_embd,
         dropout=args.dropout,
+        use_rope=args.use_rope,
     )
 
     train_dataset = TokenDataset(args.data_dir, "train", block_size)

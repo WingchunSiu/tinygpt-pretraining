@@ -15,12 +15,15 @@ class GPTConfig:
     n_embd: int = 256
     dropout: float = 0.0
     bias: bool = True
+    use_rope: bool = False
 
     def __post_init__(self):
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         if self.block_size <= 0 or self.vocab_size <= 0:
             raise ValueError("block_size and vocab_size must be positive")
+        if self.use_rope and (self.n_embd // self.n_head) % 2 != 0:
+            raise ValueError("RoPE requires an even attention head dimension")
 
 
 class CausalSelfAttention(nn.Module):
@@ -29,9 +32,25 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.use_rope = config.use_rope
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.resid_dropout = nn.Dropout(config.dropout)
+        if self.use_rope:
+            head_dim = config.n_embd // config.n_head
+            inv_freq = 1.0 / (
+                10000 ** (torch.arange(0, head_dim, 2).float() / head_dim)
+            )
+            positions = torch.arange(config.block_size).float()
+            frequencies = torch.outer(positions, inv_freq)
+            self.register_buffer("rope_cos", frequencies.cos(), persistent=False)
+            self.register_buffer("rope_sin", frequencies.sin(), persistent=False)
+
+    @staticmethod
+    def _apply_rope(x, cos, sin):
+        half_dim = x.size(-1) // 2
+        x1, x2 = x[..., :half_dim], x[..., half_dim:]
+        return torch.cat((x1 * cos - x2 * sin, x1 * sin + x2 * cos), dim=-1)
 
     def forward(self, x):
         batch_size, seq_len, channels = x.size()
@@ -41,6 +60,12 @@ class CausalSelfAttention(nn.Module):
         q = q.view(batch_size, seq_len, self.n_head, head_dim).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.n_head, head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.n_head, head_dim).transpose(1, 2)
+
+        if self.use_rope:
+            cos = self.rope_cos[:seq_len].to(dtype=q.dtype)
+            sin = self.rope_sin[:seq_len].to(dtype=q.dtype)
+            q = self._apply_rope(q, cos, sin)
+            k = self._apply_rope(k, cos, sin)
 
         y = F.scaled_dot_product_attention(
             q,
@@ -88,7 +113,11 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(
             {
                 "wte": nn.Embedding(config.vocab_size, config.n_embd),
-                "wpe": nn.Embedding(config.block_size, config.n_embd),
+                "wpe": (
+                    None
+                    if config.use_rope
+                    else nn.Embedding(config.block_size, config.n_embd)
+                ),
                 "drop": nn.Dropout(config.dropout),
                 "h": nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 "ln_f": nn.LayerNorm(config.n_embd, bias=config.bias),
@@ -118,8 +147,10 @@ class GPT(nn.Module):
                 f"Sequence length {seq_len} exceeds block size {self.config.block_size}"
             )
 
-        positions = torch.arange(seq_len, device=idx.device)
-        x = self.transformer["wte"](idx) + self.transformer["wpe"](positions)
+        x = self.transformer["wte"](idx)
+        if not self.config.use_rope:
+            positions = torch.arange(seq_len, device=idx.device)
+            x = x + self.transformer["wpe"](positions)
         x = self.transformer["drop"](x)
         for block in self.transformer["h"]:
             x = block(x)

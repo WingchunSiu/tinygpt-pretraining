@@ -10,6 +10,7 @@ The original assignment is available in [docs/capstone-project-pretraining-llm.p
 
 - Decoder-only Transformer with causal multi-head attention, LayerNorm, residual connections, and MLP blocks
 - Fixed 512-token context length
+- Learned absolute positional embeddings by default, with optional Rotary Position Embeddings (RoPE)
 - Character-level tokenizer for Tiny Shakespeare
 - GPT-2 `tiktoken` encoding with a 50,257-token vocabulary for OpenWebText
 - Non-overlapping next-token prediction sequences with train/validation/test splits
@@ -79,7 +80,7 @@ python data/prepare_openwebtext.py \
   --output-dir data/openwebtext-100k
 ```
 
-The script streams `openwebtext` from Hugging Face, shuffles it with a fixed seed, tokenizes each document with GPT-2 `tiktoken`, appends an end-of-text token, and creates 98%/1%/1% train/validation/test document splits. Tokens are stored as `uint16`.
+The script streams `Skylion007/openwebtext` from Hugging Face, shuffles it with a fixed seed, tokenizes each document with GPT-2 `tiktoken`, appends an end-of-text token, and creates 98%/1%/1% train/validation/test document splits. Tokens are stored as `uint16`.
 
 For a small preprocessing check:
 
@@ -149,6 +150,24 @@ python train.py \
 ```
 
 Run `python train.py --help` for all optimizer, logging, data-loading, and model options.
+
+### Optional RoPE comparison
+
+Keep the core baseline unchanged, then run a separate experiment with the same settings plus `--use-rope`:
+
+```bash
+python train.py \
+  --data-dir data/tiny_shakespeare \
+  --out-dir runs/shakespeare-small-rope \
+  --epochs 3 \
+  --batch-size 16 \
+  --n-layer 4 \
+  --n-head 4 \
+  --n-embd 256 \
+  --use-rope
+```
+
+RoPE removes the learned positional embedding table and rotates the query and key vectors in each attention head. The checkpoint stores this model setting, so `evaluate.py` and `sample.py` automatically use the correct mode. Compare validation loss, perplexity, and throughput against the baseline only after a full training run; short smoke runs are not meaningful architecture benchmarks.
 
 ## Two-GPU DDP
 
@@ -233,13 +252,9 @@ python plot_metrics.py \
 
 This writes `loss.png` and `throughput.png`.
 
+Completed core-run configurations, metrics, DDP scaling results, and report notes are recorded in [docs/core-runs.md](docs/core-runs.md).
+
 ## Potential next steps
-
-### Rotary Position Embeddings (RoPE)
-
-Replace the learned absolute positional embeddings with Rotary Position Embeddings applied to the query and key tensors in each attention head. Compare the baseline and RoPE models using the same model size, seed, learning rate, and token budget, and report validation loss, perplexity, and throughput.
-
-An optional extension is to train at a context length of 512 and evaluate at 1,024 tokens to study length extrapolation. RoPE's benefits may be less visible when training and evaluation both stay within the same context length.
 
 ### QK RMSNorm
 

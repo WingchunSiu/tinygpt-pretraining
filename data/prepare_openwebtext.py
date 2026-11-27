@@ -14,7 +14,7 @@ def parse_args():
     subset.add_argument("--subset", choices=["10k", "100k"])
     subset.add_argument("--num-documents", type=int)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--dataset-name", default="openwebtext")
+    parser.add_argument("--dataset-name", default="Skylion007/openwebtext")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--shuffle-buffer", type=int, default=10000)
     return parser.parse_args()
