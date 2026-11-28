@@ -200,8 +200,58 @@ Each output directory contains:
 
 - `metrics.jsonl`: training and validation records
 - `last.pt`: model weights, optimizer state, model configuration, tokenizer metadata, and training arguments
+- `best.pt`: checkpoint with the lowest finite validation loss seen during this run (ties retain the earlier checkpoint)
+
+Both checkpoints include their validation loss and the best validation loss seen so far. `last.pt` is updated after every validation; `best.pt` is updated only on improvement, including validation at the end of a partial epoch. Only rank 0 writes checkpoints in DDP. Choose checkpoints using validation loss, not test loss. These changes apply to new runs; an earlier best epoch cannot be recovered from an existing `last.pt`. The trainer does not currently support resuming interrupted runs.
 
 Training loss is recorded every `--log-interval 200` steps and at epoch boundaries. Validation loss and perplexity are recorded after every epoch and after a final partial epoch. By default, validation uses at most 50 batches; change this with `--val-batches`.
+
+## CARC: larger OpenWebText-10k run
+
+`jobs/owt10k-gpt2-small.sbatch` requests one A40, four CPU cores, 32 GB host memory, and four hours on Discovery. It trains a 12-layer, 12-head, 768-dimensional model for three epochs, with batch size 4, BF16, seed 1337, learning rate `6e-4`, logging every 100 steps, and the complete validation split each epoch. It then evaluates both `best.pt` and `last.pt` on the full test split, generates text from `best.pt`, and plots the metrics. Use a fresh output directory for every job.
+
+Before submission:
+
+1. Copy this repository's updated files to your CARC checkout.
+2. Reuse your partner's prepared dataset and CUDA-enabled Python environment. Do not copy a Mac virtualenv to CARC.
+3. If their environment requires modules, add the same `module load` commands above the activation lines in the batch file. For Conda, replace the `CARC_VENV` check and `source` line with the appropriate Conda shell setup and activation commands.
+4. Log in to Discovery and set the following values. Replace the example paths and account; `myaccount` shows available project accounts.
+
+```bash
+cd /absolute/path/to/tinygpt-pretraining
+export CARC_ACCOUNT='YOUR_PROJECT_ID'
+export CARC_VENV='/absolute/path/to/existing/carc-venv'
+export DATA_DIR='/absolute/path/to/prepared/openwebtext-10k'
+export RUN_BATCH=4
+```
+
+Submit a 300-step pilot from the repository root:
+
+```bash
+sbatch --account="$CARC_ACCOUNT" --time=00:30:00 \
+  --export=ALL,RUN_DIR=runs/owt10k-gpt2-pilot,RUN_MAX_ITERS=300 \
+  jobs/owt10k-gpt2-small.sbatch
+```
+
+The pilot also exercises evaluation, generation, and plotting. It is not a final training result. Check its Slurm log for CUDA availability, finite loss, and steady throughput. If batch size 4 runs out of GPU memory, set `RUN_BATCH=2` and submit another pilot with a different `RUN_DIR`.
+
+Use pilot throughput to estimate the full run: approximately 33.1 million training tokens divided by tokens/second, plus validation, checkpoint, and evaluation overhead. Adjust the batch file's four-hour time limit if needed, staying within the assignment's 24-hour limit. Submit the full run after the pilot succeeds:
+
+```bash
+unset RUN_MAX_ITERS
+sbatch --account="$CARC_ACCOUNT" \
+  --export=ALL,RUN_DIR=runs/owt10k-gpt2-small \
+  jobs/owt10k-gpt2-small.sbatch
+```
+
+These batch submissions request their own GPUs; a separate interactive GPU allocation is unnecessary. Do not run training on the login node. Monitor from the login node, replacing `JOB_ID` with the submitted job number:
+
+```bash
+squeue -u "$USER"
+tail -f slurm-owt10k-gpt2-JOB_ID.out
+```
+
+The output directory contains `best.pt`, `last.pt`, `metrics.jsonl`, `test-results-best.json`, `test-results-last.json`, `sample-best.txt`, and `plots/`. Keep the Slurm log as well. Compare best and final checkpoints separately, and label their selection method when comparing against the earlier small-model final checkpoint.
 
 ## Generate text
 

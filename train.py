@@ -165,9 +165,15 @@ def main():
                 file.write(json.dumps(record) + "\n")
             print(json.dumps(record), flush=True)
 
-    def save_checkpoint(step, epoch):
+    best_val_loss = math.inf
+
+    def save_checkpoint(step, epoch, val_loss):
+        nonlocal best_val_loss
         if not is_main:
             return
+        is_best = math.isfinite(val_loss) and val_loss < best_val_loss
+        if is_best:
+            best_val_loss = val_loss
         checkpoint = {
             "model": raw_model.state_dict(),
             "model_config": asdict(config),
@@ -179,8 +185,17 @@ def main():
             },
             "step": step,
             "epoch": epoch,
+            "val_loss": val_loss,
+            "best_val_loss": best_val_loss,
         }
         torch.save(checkpoint, args.out_dir / "last.pt")
+        if is_best:
+            torch.save(checkpoint, args.out_dir / "best.pt")
+            print(
+                f"Saved best checkpoint at epoch {epoch}, step {step} "
+                f"with validation loss {val_loss:.4f}",
+                flush=True,
+            )
 
     steps_per_epoch = len(train_loader)
     total_steps = args.epochs * steps_per_epoch
@@ -299,7 +314,7 @@ def main():
             }
         )
         last_val_step = step
-        save_checkpoint(step, epoch)
+        save_checkpoint(step, epoch, val_loss)
         window_start = time.perf_counter()
 
     if last_val_step != step:
@@ -313,7 +328,7 @@ def main():
                 "perplexity": math.exp(val_loss),
             }
         )
-        save_checkpoint(step, epoch)
+        save_checkpoint(step, epoch, val_loss)
 
     if is_main:
         print(f"Saved checkpoint to {args.out_dir / 'last.pt'}", flush=True)
