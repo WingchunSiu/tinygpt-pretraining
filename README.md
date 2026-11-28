@@ -210,36 +210,46 @@ Training loss is recorded every `--log-interval 200` steps and at epoch boundari
 
 `jobs/owt10k-gpt2-small.sbatch` requests one A40, four CPU cores, 32 GB host memory, and four hours on Discovery. It trains a 12-layer, 12-head, 768-dimensional model for three epochs, with batch size 4, BF16, seed 1337, learning rate `6e-4`, logging every 100 steps, and the complete validation split each epoch. It then evaluates both `best.pt` and `last.pt` on the full test split, generates text from `best.pt`, and plots the metrics. Use a fresh output directory for every job.
 
-Before submission:
+No existing Python environment or partner-specific paths are required. `jobs/carc-setup.sbatch` runs on a CPU node, loads CARC's `gcc/13.3.0` and `python/3.11.9` modules, creates `.venv-carc`, installs PyTorch 2.6.0 with CUDA 12.4 plus the project requirements, and streams/tokenizes OpenWebText-10k if `data/openwebtext-10k` is absent. It checks existing data without overwriting it, verifies document counts and token-file sizes, and records installed package versions in `.venv-carc/requirements-lock.txt`. Caches are kept under `.cache/`.
 
-1. Copy this repository's updated files to your CARC checkout.
-2. Reuse your partner's prepared dataset and CUDA-enabled Python environment. Do not copy a Mac virtualenv to CARC.
-3. If their environment requires modules, add the same `module load` commands above the activation lines in the batch file. For Conda, replace the `CARC_VENV` check and `source` line with the appropriate Conda shell setup and activation commands.
-4. Log in to Discovery and set the following values. Replace the example paths and account; `myaccount` shows available project accounts.
+On CARC, enter your repository root and update it:
 
 ```bash
 cd /absolute/path/to/tinygpt-pretraining
-export CARC_ACCOUNT='YOUR_PROJECT_ID'
-export CARC_VENV='/absolute/path/to/existing/carc-venv'
-export DATA_DIR='/absolute/path/to/prepared/openwebtext-10k'
-export RUN_BATCH=4
+git pull --ff-only origin main
 ```
 
-Submit a 300-step pilot from the repository root:
+Submit setup using your default Slurm account, then queue the pilot to start only if setup succeeds:
 
 ```bash
-sbatch --account="$CARC_ACCOUNT" --time=00:30:00 \
+setup_job=$(sbatch --parsable jobs/carc-setup.sbatch)
+setup_job=${setup_job%%;*}
+echo "Setup job: $setup_job"
+
+sbatch --dependency=afterok:"$setup_job" --kill-on-invalid-dep=yes \
+  --time=00:30:00 \
   --export=ALL,RUN_DIR=runs/owt10k-gpt2-pilot,RUN_MAX_ITERS=300 \
   jobs/owt10k-gpt2-small.sbatch
 ```
 
-The pilot also exercises evaluation, generation, and plotting. It is not a final training result. Check its Slurm log for CUDA availability, finite loss, and steady throughput. If batch size 4 runs out of GPU memory, set `RUN_BATCH=2` and submit another pilot with a different `RUN_DIR`.
+Run the pilot submission only if `setup_job` contains a numeric job ID. Both jobs inherit the same environment variables. If you have set old `CARC_VENV` or `DATA_DIR` overrides and want these fresh defaults, run `unset CARC_VENV DATA_DIR` before submitting setup. If Slurm requires an explicit account, run `myaccount` to find your own allocation and add `--account=YOUR_PROJECT_ID` to both submissions. You do not need to ask your partner for their account. Optional `CARC_GCC_MODULE`, `CARC_PYTHON_MODULE`, `CARC_VENV`, and `DATA_DIR` overrides must be identical for setup and training. For example, place the environment, dataset, or Hugging Face cache on your project's storage if your checkout has insufficient free space.
+
+The pilot also exercises evaluation, generation, and plotting. It is not a final training result. Check its Slurm log for CUDA availability, finite loss, and steady throughput. If batch size 4 runs out of GPU memory, set `export RUN_BATCH=2` and submit another pilot with a different `RUN_DIR` after setup has succeeded. Setup uses no GPU; CUDA device compatibility is checked by the pilot.
+
+To preprocess manually in the installed environment on a CPU allocation, the existing command is:
+
+```bash
+source .venv-carc/bin/activate
+python data/prepare_openwebtext.py --subset 10k --output-dir data/openwebtext-10k
+```
+
+The setup job already runs this when data is absent. Do not manually rerun it over an existing dataset. A fresh download uses the source's current revision; verify split/token metadata against the earlier experiment before treating regenerated data as an identical comparison.
 
 Use pilot throughput to estimate the full run: approximately 33.1 million training tokens divided by tokens/second, plus validation, checkpoint, and evaluation overhead. Adjust the batch file's four-hour time limit if needed, staying within the assignment's 24-hour limit. Submit the full run after the pilot succeeds:
 
 ```bash
 unset RUN_MAX_ITERS
-sbatch --account="$CARC_ACCOUNT" \
+sbatch \
   --export=ALL,RUN_DIR=runs/owt10k-gpt2-small \
   jobs/owt10k-gpt2-small.sbatch
 ```
@@ -248,6 +258,7 @@ These batch submissions request their own GPUs; a separate interactive GPU alloc
 
 ```bash
 squeue -u "$USER"
+tail -f slurm-tinygpt-setup-SETUP_JOB_ID.out
 tail -f slurm-owt10k-gpt2-JOB_ID.out
 ```
 

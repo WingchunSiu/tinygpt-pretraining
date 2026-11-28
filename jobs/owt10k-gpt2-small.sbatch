@@ -14,11 +14,15 @@ set -euo pipefail
 # Submit from the repository root. Supply your course account via sbatch --account.
 cd "${SLURM_SUBMIT_DIR:?Submit this file using sbatch from the repository root}"
 
-# Add your partner's module-load commands here if their environment requires them.
-# CARC_VENV is the absolute path to an existing CUDA-enabled Python virtualenv.
-# For a Conda environment, replace the next two lines with its shell setup and
-# conda activate commands instead.
-: "${CARC_VENV:?Export CARC_VENV as the absolute path to your CARC virtualenv}"
+# Match the modules and environment created by carc-setup.sbatch.
+module load "${CARC_GCC_MODULE:-gcc/13.3.0}" "${CARC_PYTHON_MODULE:-python/3.11.9}"
+CARC_VENV="${CARC_VENV:-$PWD/.venv-carc}"
+export HF_HOME="${HF_HOME:-$PWD/.cache/huggingface}"
+export TIKTOKEN_CACHE_DIR="${TIKTOKEN_CACHE_DIR:-$PWD/.cache/tiktoken}"
+if [[ ! -f "$CARC_VENV/bin/activate" ]]; then
+    echo "Environment missing. Submit jobs/carc-setup.sbatch first." >&2
+    exit 1
+fi
 source "$CARC_VENV/bin/activate"
 
 RUN_DIR="${RUN_DIR:-runs/owt10k-gpt2-small}"
